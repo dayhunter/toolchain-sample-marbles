@@ -55,9 +55,9 @@ services:
       imageUrl: 'https://github.com/IBM-Blockchain/toolchain-sample-marbles/raw/master/.bluemix/marbles-36.png'
       documentationUrl: 'https://github.com/IBM-Blockchain/marbles'
       name: 'Node.js Applicaiton'
-      dashboard_url: 'https://{{form.pipeline.parameters.prod-app-name}}.stage1.mybluemix.net/login'
+      dashboard_url: 'https://{{form.pipeline.parameters.prod-app-name}}.mybluemix.net/login'
       description: 'This is your Marbles node.js application. You do not need to modify anything.'
-      additional-properties: 'nope'
+      additional-properties: 'n/a'
 form:
   pipeline:
     parameters:
