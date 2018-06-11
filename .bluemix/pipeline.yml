@@ -33,14 +33,15 @@ stages:
       #!/bin/bash
       trap 'detect_exit' 0 1 2 3 6
 
-      export VCAP_KEY_NAME="marbles_tc_creds"
-      export CHANNEL_ID="defaultchannel"
-      export CHAINCODE_ID="marbles_sample"
+      export VCAP_KEY_NAME="marbles_tc_creds"         # cloud foundry needs a name for the service creds (not important)
+      export CHANNEL_ID="defaultchannel"              # the channel marbles should use
+      export CHAINCODE_ID="marbles_sample"            # the chaincode id we will install/instantiate
       #export TIMESTAMP=$(date +%s)
-      export APP_URL="unknown_yet"                    # we correct this later
+      export APP_URL="unknown_yet"                    # we fill this in later
       GIT_CC_HASH=$(git ls-tree --abbrev=12 HEAD ./chaincode/src/marbles | cut -d ' ' -f 3 | cut -f 1)
       GIT_HASH=$(git rev-parse HEAD)
 
+      # detect_exit - will update the IBP service with the error or success of your marbles deployment
       detect_exit()
       {
         if [ "$COMPLETED_STEP" != "5" ]; then
@@ -58,6 +59,7 @@ stages:
         fi
       }
 
+      # update_status - will update the IBP service with the status of your marbles deployment
       update_status()
       {
         printf "\nUpdating Sample's Deployment Status - network id: '${NETWORK_ID}', app: '$CF_APP', status: '$COMPLETED_STEP'\n"
@@ -120,20 +122,22 @@ stages:
       # 1. Create service creds for the service instance
       # -----------------------------------------------------------
       printf "\n --- Creating service credentials for your IBM Blockchain Platform service ---\n"
-      cf delete-service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME} -f || true               # remove an old key if it exists (stale)
-      cf create-service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME}                          # create a new/updated key
+      cf delete-service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME} -f || true             # remove an old key if it exists (stale)
+      cf create-service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME}                        # create a new/updated key
 
       # -----------------------------------------------------------
       # Get service credentials into our file system (remove the first two lines from cf service-key output)
       # -----------------------------------------------------------
       printf "\n --- Getting service credentials ---\n"
-      cf service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME} > ./config/temp.txt                # load the key
+      cf service-key "${SERVICE_INSTANCE_NAME}" ${VCAP_KEY_NAME} > ./config/temp.txt           # load the service credentials
       tail -n +2 ./config/temp.txt > ./config/marbles_tc.json
       #cat ./config/marbles_tc.json -b             # uncomment this if you are okay with your service creds being logged
-      export API_HOST="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.url' -r)"    # use the msp id from the env var
-      export API_KEY="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.key' -r)"
-      export API_SECRET="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.secret' -r)"
-      export NETWORK_ID="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.network_id' -r)"
+
+      # MSP_ID (from our env varible) will be used to parse the service credentials to find each field below
+      export API_HOST="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.url' -r)"      # url of the blockchain service to use for api requests
+      export API_KEY="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.key' -r)"       # key/username to use in our api requests
+      export API_SECRET="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.secret' -r)" # secret/password to use in our api requests
+      export NETWORK_ID="$(cat ./config/marbles_tc.json | jq '.'$MSP_ID'.network_id' -r)" # the unique id of our blokchain network
       echo "Using Network ID ${NETWORK_ID}, api host=$API_HOST, api key=$API_KEY"
       export COMPLETED_STEP="1"
       update_status
@@ -187,7 +191,7 @@ stages:
           -H 'Content-Type: application/json' \
           -u $API_KEY:$API_SECRET \
           -d '{"chaincode_id":"'"$CHAINCODE_ID"'", "chaincode_version":"'"$GIT_CC_HASH"'", "chaincode_arguments":"[\"12345\"]"}' \
-          --connect-timeout 180 || true)
+          --connect-timeout 200 || true)
         printf "\nResp: $INSTANTIATE_RESP\n"
         INSTANTIATED=$(echo "$INSTANTIATE_RESP" | jq '.message' -r || true)  # parse the instantiate response for the "message" field
         i=$[$i+1]
@@ -239,18 +243,18 @@ stages:
       # 5. Push application and Bind the service
       # -----------------------------------------------------------
       printf "\n --- Creating the Marbles application ---\n"
-      cf push $CF_APP --no-start                            # don't start yet, wait for binding
+      cf push $CF_APP --no-start                              # don't start the app yet, wait for binding
 
       echo "Creating env variables for mables..."
       cf set-env $CF_APP CONNECTION_PROFILE "$CONNECTION_PROFILE" > /dev/null
-      cf set-env $CF_APP CHAINCODE_ID $CHAINCODE_ID               # pass these to the app so we know which one to use
+      cf set-env $CF_APP CHAINCODE_ID $CHAINCODE_ID           # pass these to the app so we know which one to use
       cf set-env $CF_APP CHAINCODE_VERSION $GIT_CC_HASH
       cf set-env $CF_APP CHANNEL_ID $CHANNEL_ID
       cf set-env $CF_APP MSP_ID $MSP_ID
       export APP_URL=$(cf app $CF_APP | grep -Po "(?<=routes:)\s*\S*")
 
       printf "\n --- Binding the IBM Blockchain Platform service to Marbles ---\n"
-      cf bind-service $CF_APP "${SERVICE_INSTANCE_NAME}" -c "{\"permissions\":\"read-only\"}"   # bind marbles to the service
+      cf bind-service $CF_APP "${SERVICE_INSTANCE_NAME}" -c "{\"permissions\":\"read-only\"}"  # bind marbles app to the blockchain service
 
       # -----------------------------------------------------------
       # Start her up
